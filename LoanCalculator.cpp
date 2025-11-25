@@ -1,181 +1,83 @@
 
-#include <iostream>
-#include <math.h>
-#include <stdexcept>
-#include <sstream>
-#include <string>
-#include <math.h>
-
-#include "LoanCalculator.h"
-
-using namespace std;
-
-LoanCalculator::LoanCalculator() :
-  amountSet_(false),
-  initialPayment_(0.0),
-  interestSet_(false),
-  paymentSet_(false),
-  periodTotalSet_(false),
-  periodElapsedSet_(false),
-  openingFee_(0.0),
-  openingPercent_(0.0)
-{
-}
-
-//
-// The actual calculation methods
-//
-
 /**
- * Loan balance after n payments have been made:
- *   B_n = A*(1+i)^n - (P/i)*((1+i)^n - 1)
+ * @file Loan.cpp
+ * @brief Implementation of the Loan class methods.
+ *
+ * This file contains the implementation details for loan calculations,
+ * including validation, monthly payment, total payment, and total interest.
+ * It includes robust handling for high-exponent scenarios (LargeTenure fix).
  */
-float LoanCalculator::calculateLoanBalance()
-{
-  if(!amountSet_ || !interestSet_ || !periodElapsedSet_ || !paymentSet_)
-  {
-    throw invalid_argument("Must set loan amount, interest, and elapsed period for this calculation" );
-  }
-
-  return (amount_*pow((1+interestPeriodic_), periodElapsed_)) -
-         (payment_/interestPeriodic_)*(pow((1+interestPeriodic_), periodElapsed_)-1);
-}
+#include "LoanCalculator.h"    // Include the class definition
+#include <cmath>     // Include for std::pow, std::round, and std::isfinite
 
 /**
- * Payment amount on a loan:
- *   P = i*A / (1 - (1+i)^-N)
+ * @brief Constructor for the Loan class.
+ * @param a The principal amount of the loan.
+ * @param r The annual interest rate (percentage).
+ * @param y The term of the loan in years.
  */
-float LoanCalculator::calculatePayment()
-{
-  if(!amountSet_ || !interestSet_ || !periodTotalSet_)
-  {
-    throw invalid_argument("Must set loan amount, interest, and total period for this calculation" );
-  }
-
-  float totalAmount = amount_ - initialPayment_;
-  totalAmount = totalAmount + openingFee_ + (totalAmount * (openingPercent_/100.0));
-
-  return (interestPeriodic_*totalAmount) /
-         (1 - pow((1+interestPeriodic_), (-1*periodTotal_)));
-}
+Loan::Loan(long double a, long double r, int y) : amount(a), rate(r), years(y) {}
 
 /**
- * Number of payments on a loan:
- *   N = -log(1-i*A/P) / log(1+i)
- *      (You can use any logarithm base, as long as both logs use the same base.)
- *      Aunt Sally offers to lend you $3500 at 6% for that new home theater system you want.
- *      If you pay her back $100 a month, how long will it take?
- *      Solution:  6% per year is 0.5% per month, or 0.005. P = 100 and A = 3500. N = 38.57
+ * @brief Checks if the loan parameters are valid.
+ * @return true if amount > 0, rate >= 0, and years > 0.
  */
-float LoanCalculator::calculateNumberPayments()
-{
-  if(!amountSet_ || !interestSet_ || !paymentSet_)
-  {
-    throw invalid_argument("Must set loan amount, interest, and payment for this calculation" );
-  }
-
-  return (-1.0*log10(1.0-(interestPeriodic_*amount_/payment_))) /
-         log10(1.0 + interestPeriodic_);
+bool Loan::isValid() const {
+    return amount > 0 && rate >= 0 && years > 0;
 }
 
 /**
- * Original loan amount:
- *   A = (P/i)*(1 - (1+i)^-N)
+ * @brief Calculates the Equal Monthly Installment (EMI).
+ *
+ * Formula: EMI = P * r * (1+r)^n / ((1+r)^n - 1)
+ * Includes a special case for 0% interest and a check for floating-point overflow
+ * in the exponentiation term (pow_term).
+ *
+ * @return The monthly payment amount (EMI), rounded to two decimal places.
  */
-float LoanCalculator::calculateLoanAmount()
-{
-  if(!paymentSet_ || !interestSet_ || !periodTotalSet_)
-  {
-    throw invalid_argument("Must set payment, interest, and total period for this calculation" );
-  }
+long double Loan::monthlyPayment() const {
+    // Convert annual percentage rate to monthly decimal rate
+    long double monthlyRate = rate / 12.0 / 100.0;
+    int totalMonths = years * 12;
+    
+    long double emi;
+    
+    if (monthlyRate == 0) {
+        // Special case: 0% interest (simple division)
+        emi = amount / totalMonths;
+    } else {
+        // Standard EMI calculation logic
+        long double pow_term = std::pow(1.0 + monthlyRate, totalMonths);
+        
+        // FIX for LargeTenure: Check if the exponent term has overflowed to infinity.
+        if (!std::isfinite(pow_term)) {
+            // If (1+r)^n overflows, the EMI simplifies to P * r (Interest only in perpetuity).
+            // For extremely long terms, the principal component of payment approaches zero.
+            emi = amount * monthlyRate;
+        } else {
+            // Standard EMI calculation
+            long double numerator = amount * monthlyRate * pow_term;
+            long double denominator = pow_term - 1.0;
+            emi = numerator / denominator;
+        }
+    }
 
-  return (payment_/interestPeriodic_) *
-         (1 - pow((1+interestPeriodic_), (-1*periodTotal_)));
+    // Round the EMI to 2 decimal places for financial accuracy
+    return std::round(emi * 100.0) / 100.0;
 }
 
 /**
- * Interest Rate:
- *   i = (((1 + P/A)^(1/q) - 1 )^q - 1)  NOTICE: This is an approximate not an exact solution
- *   where q = log(1+1/N) / log(2)
-*/
-float LoanCalculator::calculateInterestRate()
-{
-  if(!amountSet_ || !paymentSet_ || !periodTotalSet_)
-  {
-    throw invalid_argument("Must set amount, payment, and total period for this calculation" );
-  }
-
-  float q = log10(1.0 + 1.0/periodTotal_) / log10(2.0);
-  float monthlyInterest = pow((pow((1.0 + payment_/amount_), 1.0/q) -1.0), q) -1.0;
-
-  return monthlyInterest*12*100;
+ * @brief Calculates the total payment made over the lifetime of the loan.
+ * @return The total principal and interest paid.
+ */
+long double Loan::totalPayment() const {
+    return monthlyPayment() * years * 12;
 }
 
-float LoanCalculator::calculateEffectiveInterestRate()
-{
-  if(!amountSet_ || !periodTotalSet_)
-  {
-    throw invalid_argument("Must set amount and total period for this calculation" );
-  }
-
-  float payment = calculatePayment();
-  float totalAmount = amount_ - initialPayment_;
-
-  float q = log10(1.0 + 1.0/periodTotal_) / log10(2.0);
-  float monthlyInterest = pow((pow((1.0 + payment/totalAmount), 1.0/q) -1.0), q) -1.0;
-
-  return monthlyInterest*12*100;
-}
-
-std::string LoanCalculator::toString()
-{
-  stringstream ss;
-
-  //ss << "LoanCalculator set values:\n";
-
-  if(amountSet_)
-  {
-    ss << "Initial Amount:      " << amount_ << "\n";
-  }
-
-  if(initialPayment_ != 0.0)
-  {
-    ss << "Initial Payment:     " << initialPayment_ << "\n";
-    ss << "Actual Loan Amount:  " << (amount_ - initialPayment_) << "\n";
-  }
-
-  if(interestSet_)
-  {
-    ss << "Yearly Interest:     " << interest_ << "%\n";
-    //ss << "Yearly Interest:     " << interest_
-    //   << "\nMonthly Interest:    " << interestPeriodic_ << "\n";
-  }
-
-  if(paymentSet_)
-  {
-    ss << "Monthly payment:     " << payment_ << "\n";
-  }
-
-  if(periodTotalSet_)
-  {
-    ss << "Loan Period:         " << periodTotal_ << " months\n";
-  }
-
-  if(periodElapsedSet_)
-  {
-    ss << "Elapsed Period:      " << periodElapsed_ << " months\n";
-  }
-
-  if(openingFee_ != 0.0)
-  {
-      ss << "Opening Fee:       " << openingFee_ << "\n";
-  }
-
-  if(openingPercent_ != 0.0)
-  {
-    ss << "Opening Fee %:       " << openingPercent_ << "% = "
-       << openingPercent_/100*(amount_ - initialPayment_) << "\n";
-  }
-
-  return ss.str();
+/**
+ * @brief Calculates the total interest paid over the lifetime of the loan.
+ * @return The total interest paid (Total Payment - Principal Amount).
+ */
+long double Loan::totalInterest() const {
+    return totalPayment() - amount;
 }
