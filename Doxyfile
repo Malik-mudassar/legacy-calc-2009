@@ -1,0 +1,7 @@
+PROJECT_NAME           = "Loan Calculator"
+OUTPUT_DIRECTORY       = docs
+INPUT                  = .          # directory with your source code
+RECURSIVE              = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO          # optional, skip LaTeX/PDF if not needed
+EXTRACT_ALL            = YES         # include all classes and functions
